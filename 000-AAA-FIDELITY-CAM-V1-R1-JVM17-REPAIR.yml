@@ -1,0 +1,536 @@
+name: 000 AAA FIDELITY CAM V1 R1 JVM17 REPAIR
+
+'on':
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/000-AAA-FIDELITY-CAM-V1-R1-JVM17-REPAIR.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: "8.13"
+
+      - name: Create independent Fidelity Cam V1 project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "FidelityCam"
+          include(":app")
+          EOF
+
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.10.1" apply false
+              id("org.jetbrains.kotlin.android") version "2.1.20" apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          kotlin.code.style=official
+          EOF
+
+          mkdir -p app/src/main/java/com/sentongoharuna/fidelity
+          mkdir -p app/src/main/res/values
+
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.sentongoharuna.fidelity"
+              compileSdk = 35
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+
+              defaultConfig {
+                  applicationId = "com.sentongoharuna.fidelity"
+                  minSdk = 26
+                  targetSdk = 35
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+          }
+
+          dependencies {
+              implementation("androidx.core:core-ktx:1.15.0")
+              implementation("androidx.appcompat:appcompat:1.7.1")
+              implementation("androidx.camera:camera-core:1.4.2")
+              implementation("androidx.camera:camera-camera2:1.4.2")
+              implementation("androidx.camera:camera-lifecycle:1.4.2")
+              implementation("androidx.camera:camera-video:1.4.2")
+              implementation("androidx.camera:camera-view:1.4.2")
+          }
+          EOF
+
+          cat > app/src/main/res/values/styles.xml <<'EOF'
+          <resources>
+              <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:windowLightStatusBar">false</item>
+                  <item name="android:statusBarColor">#05080D</item>
+                  <item name="android:navigationBarColor">#05080D</item>
+                  <item name="android:colorAccent">#FFFFFF</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.CAMERA"/>
+              <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+              <uses-feature android:name="android.hardware.camera.any" android:required="true"/>
+
+              <application
+                  android:theme="@style/AppTheme"
+                  android:label="Fidelity Cam"
+                  android:allowBackup="false"
+                  android:supportsRtl="true">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:screenOrientation="portrait"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/com/sentongoharuna/fidelity/FidelityEngine.kt <<'EOF'
+          package com.sentongoharuna.fidelity
+
+          import androidx.camera.video.FallbackStrategy
+          import androidx.camera.video.Quality
+          import androidx.camera.video.QualitySelector
+
+          object FidelityEngine {
+              const val NAME = "FIDELITY ENGINE V1"
+              const val TARGET_FPS = 30
+              const val INTENT = "CLEAN MASTER • DETAIL FIRST • CAPABILITY NEGOTIATED"
+
+              fun qualitySelector(): QualitySelector =
+                  QualitySelector.fromOrderedList(
+                      listOf(Quality.UHD, Quality.FHD, Quality.HD, Quality.SD),
+                      FallbackStrategy.lowerQualityOrHigherThan(Quality.FHD)
+                  )
+          }
+          EOF
+
+          cat > app/src/main/java/com/sentongoharuna/fidelity/MainActivity.kt <<'EOF'
+          package com.sentongoharuna.fidelity
+
+          import android.Manifest
+          import android.content.ContentValues
+          import android.content.pm.PackageManager
+          import android.os.Build
+          import android.os.Bundle
+          import android.provider.MediaStore
+          import android.view.Gravity
+          import android.widget.Button
+          import android.widget.FrameLayout
+          import android.widget.LinearLayout
+          import android.widget.TextView
+          import androidx.activity.result.contract.ActivityResultContracts
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.camera.core.Camera
+          import androidx.camera.core.CameraSelector
+          import androidx.camera.core.FocusMeteringAction
+          import androidx.camera.core.Preview
+          import androidx.camera.lifecycle.ProcessCameraProvider
+          import androidx.camera.video.MediaStoreOutputOptions
+          import androidx.camera.video.Recorder
+          import androidx.camera.video.Recording
+          import androidx.camera.video.VideoCapture
+          import androidx.camera.video.VideoRecordEvent
+          import androidx.camera.view.PreviewView
+          import androidx.core.content.ContextCompat
+          import java.text.SimpleDateFormat
+          import java.util.Date
+          import java.util.Locale
+          import java.util.concurrent.TimeUnit
+
+          class MainActivity : AppCompatActivity() {
+              private lateinit var previewView: PreviewView
+              private lateinit var statusView: TextView
+              private lateinit var recordButton: Button
+              private lateinit var lensButton: Button
+
+              private var cameraProvider: ProcessCameraProvider? = null
+              private var camera: Camera? = null
+              private var videoCapture: VideoCapture<Recorder>? = null
+              private var recording: Recording? = null
+              private var frontCamera = false
+
+              private val permissionLauncher =
+                  registerForActivityResult(
+                      ActivityResultContracts.RequestMultiplePermissions()
+                  ) { result ->
+                      if (result[Manifest.permission.CAMERA] == true) {
+                          startCamera()
+                      } else {
+                          statusView.text = "CAMERA PERMISSION REQUIRED"
+                      }
+                  }
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  buildUi()
+
+                  if (
+                      ContextCompat.checkSelfPermission(
+                          this,
+                          Manifest.permission.CAMERA
+                      ) == PackageManager.PERMISSION_GRANTED
+                  ) {
+                      startCamera()
+                  } else {
+                      permissionLauncher.launch(
+                          arrayOf(
+                              Manifest.permission.CAMERA,
+                              Manifest.permission.RECORD_AUDIO
+                          )
+                      )
+                  }
+              }
+
+              private fun buildUi() {
+                  val root =
+                      FrameLayout(this).apply {
+                          setBackgroundColor(0xFF05080D.toInt())
+                      }
+
+                  previewView =
+                      PreviewView(this).apply {
+                          scaleType = PreviewView.ScaleType.FILL_CENTER
+                          implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                      }
+                  root.addView(
+                      previewView,
+                      FrameLayout.LayoutParams(
+                          FrameLayout.LayoutParams.MATCH_PARENT,
+                          FrameLayout.LayoutParams.MATCH_PARENT
+                      )
+                  )
+
+                  val header =
+                      LinearLayout(this).apply {
+                          orientation = LinearLayout.VERTICAL
+                          setPadding(dp(16), dp(14), dp(16), dp(12))
+                          setBackgroundColor(0x9905080D.toInt())
+                      }
+
+                  header.addView(
+                      TextView(this).apply {
+                          text = "FIDELITY CAM"
+                          textSize = 22f
+                          setTextColor(0xFFFFFFFF.toInt())
+                      }
+                  )
+
+                  statusView =
+                      TextView(this).apply {
+                          text = "STARTING • ${FidelityEngine.INTENT}"
+                          textSize = 12f
+                          setTextColor(0xFFD7DEE8.toInt())
+                      }
+                  header.addView(statusView)
+
+                  root.addView(
+                      header,
+                      FrameLayout.LayoutParams(
+                          FrameLayout.LayoutParams.MATCH_PARENT,
+                          FrameLayout.LayoutParams.WRAP_CONTENT,
+                          Gravity.TOP
+                      )
+                  )
+
+                  val controls =
+                      LinearLayout(this).apply {
+                          orientation = LinearLayout.HORIZONTAL
+                          gravity = Gravity.CENTER
+                          setPadding(dp(14), dp(12), dp(14), dp(22))
+                          setBackgroundColor(0xB305080D.toInt())
+                      }
+
+                  lensButton =
+                      Button(this).apply {
+                          text = "FLIP"
+                          setOnClickListener {
+                              if (recording == null) {
+                                  frontCamera = !frontCamera
+                                  startCamera()
+                              }
+                          }
+                      }
+
+                  recordButton =
+                      Button(this).apply {
+                          text = "● REC"
+                          setOnClickListener { toggleRecording() }
+                      }
+
+                  controls.addView(
+                      lensButton,
+                      LinearLayout.LayoutParams(0, dp(56), 1f)
+                  )
+                  controls.addView(
+                      recordButton,
+                      LinearLayout.LayoutParams(0, dp(64), 2f).apply {
+                          marginStart = dp(12)
+                      }
+                  )
+
+                  root.addView(
+                      controls,
+                      FrameLayout.LayoutParams(
+                          FrameLayout.LayoutParams.MATCH_PARENT,
+                          FrameLayout.LayoutParams.WRAP_CONTENT,
+                          Gravity.BOTTOM
+                      )
+                  )
+
+                  setContentView(root)
+
+                  previewView.setOnTouchListener { _, event ->
+                      if (event.action == android.view.MotionEvent.ACTION_UP) {
+                          val point =
+                              previewView.meteringPointFactory.createPoint(
+                                  event.x,
+                                  event.y
+                              )
+                          camera?.cameraControl?.startFocusAndMetering(
+                              FocusMeteringAction.Builder(point)
+                                  .setAutoCancelDuration(3, TimeUnit.SECONDS)
+                                  .build()
+                          )
+                          statusView.text = "FOCUS / METERING SET"
+                      }
+                      true
+                  }
+              }
+
+              private fun startCamera() {
+                  statusView.text = "OPENING CAMERA…"
+                  val future = ProcessCameraProvider.getInstance(this)
+
+                  future.addListener(
+                      {
+                          val provider = future.get()
+                          cameraProvider = provider
+                          provider.unbindAll()
+
+                          val selector =
+                              if (frontCamera) {
+                                  CameraSelector.DEFAULT_FRONT_CAMERA
+                              } else {
+                                  CameraSelector.DEFAULT_BACK_CAMERA
+                              }
+
+                          val preview =
+                              Preview.Builder()
+                                  .build()
+                                  .also {
+                                      it.setSurfaceProvider(
+                                          previewView.surfaceProvider
+                                      )
+                                  }
+
+                          val recorder =
+                              Recorder.Builder()
+                                  .setQualitySelector(
+                                      FidelityEngine.qualitySelector()
+                                  )
+                                  .build()
+
+                          videoCapture = VideoCapture.withOutput(recorder)
+
+                          runCatching {
+                              provider.bindToLifecycle(
+                                  this,
+                                  selector,
+                                  preview,
+                                  videoCapture
+                              )
+                          }.onSuccess {
+                              camera = it
+                              statusView.text =
+                                  "READY • ${FidelityEngine.NAME} • AUTO QUALITY"
+                          }.onFailure {
+                              statusView.text =
+                                  "CAMERA UNAVAILABLE • ${it.javaClass.simpleName}"
+                          }
+                      },
+                      ContextCompat.getMainExecutor(this)
+                  )
+              }
+
+              private fun toggleRecording() {
+                  val capture = videoCapture ?: run {
+                      statusView.text = "CAMERA STILL STARTING"
+                      return
+                  }
+
+                  if (recording != null) {
+                      statusView.text = "SAVING CLEAN MASTER…"
+                      recordButton.isEnabled = false
+                      recording?.stop()
+                      return
+                  }
+
+                  val displayName =
+                      "FIDELITY_" +
+                          SimpleDateFormat(
+                              "yyyyMMdd_HHmmss",
+                              Locale.US
+                          ).format(Date()) +
+                          ".mp4"
+
+                  val values =
+                      ContentValues().apply {
+                          put(
+                              MediaStore.Video.Media.DISPLAY_NAME,
+                              displayName
+                          )
+                          put(
+                              MediaStore.Video.Media.MIME_TYPE,
+                              "video/mp4"
+                          )
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                              put(
+                                  MediaStore.Video.Media.RELATIVE_PATH,
+                                  "Movies/FidelityCam"
+                              )
+                          }
+                      }
+
+                  val output =
+                      MediaStoreOutputOptions.Builder(
+                          contentResolver,
+                          MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                      )
+                          .setContentValues(values)
+                          .build()
+
+                  var pending =
+                      capture.output.prepareRecording(this, output)
+
+                  if (
+                      ContextCompat.checkSelfPermission(
+                          this,
+                          Manifest.permission.RECORD_AUDIO
+                      ) == PackageManager.PERMISSION_GRANTED
+                  ) {
+                      pending = pending.withAudioEnabled()
+                  }
+
+                  recording =
+                      pending.start(
+                          ContextCompat.getMainExecutor(this)
+                      ) { event ->
+                          when (event) {
+                              is VideoRecordEvent.Start -> {
+                                  recordButton.text = "■ STOP"
+                                  recordButton.isEnabled = true
+                                  lensButton.isEnabled = false
+                                  statusView.text =
+                                      "● REC • CLEAN MASTER"
+                              }
+
+                              is VideoRecordEvent.Finalize -> {
+                                  recording = null
+                                  recordButton.text = "● REC"
+                                  recordButton.isEnabled = true
+                                  lensButton.isEnabled = true
+
+                                  statusView.text =
+                                      if (event.hasError()) {
+                                          "SAVE ERROR • ${event.error}"
+                                      } else {
+                                          "SAVED • CLEAN MASTER"
+                                      }
+                              }
+                          }
+                      }
+              }
+
+              override fun onDestroy() {
+                  recording?.stop()
+                  cameraProvider?.unbindAll()
+                  super.onDestroy()
+              }
+
+              private fun dp(value: Int): Int =
+                  (value * resources.displayMetrics.density).toInt()
+          }
+          EOF
+
+      - name: Compile Fidelity Cam V1
+        run: gradle --no-daemon --console=plain --max-workers=2 :app:compileDebugKotlin
+
+      - name: Build Fidelity Cam V1 APK
+        run: gradle --no-daemon --console=plain --max-workers=2 :app:assembleDebug
+
+      - name: Prepare APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk FIDELITY-CAM-V1-R1.apk
+          sha256sum FIDELITY-CAM-V1-R1.apk > FIDELITY-CAM-V1-R1.apk.sha256
+
+      - name: Upload Fidelity Cam V1
+        uses: actions/upload-artifact@v4
+        with:
+          name: FIDELITY-CAM-V1-R1
+          path: |
+            FIDELITY-CAM-V1-R1.apk
+            FIDELITY-CAM-V1-R1.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
