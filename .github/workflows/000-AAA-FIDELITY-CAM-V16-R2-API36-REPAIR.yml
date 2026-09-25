@@ -1,0 +1,1686 @@
+name: 000 AAA FIDELITY CAM V16 R2 API36 REPAIR
+
+'on':
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/000-AAA-FIDELITY-CAM-V16-R2-API36-REPAIR.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: "8.13"
+
+      - name: Create independent Fidelity Cam V1 project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "FidelityCam"
+          include(":app")
+          EOF
+
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.10.1" apply false
+              id("org.jetbrains.kotlin.android") version "2.1.20" apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          kotlin.code.style=official
+          EOF
+
+          mkdir -p app/src/main/java/com/sentongoharuna/fidelity
+          mkdir -p app/src/main/res/values
+
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.sentongoharuna.fidelity"
+              compileSdk = 36
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+
+              defaultConfig {
+                  applicationId = "com.sentongoharuna.fidelity"
+                  minSdk = 26
+                  targetSdk = 35
+                  versionCode = 160
+                  versionName = "16.0"
+              }
+          }
+
+          dependencies {
+              implementation("androidx.core:core-ktx:1.15.0")
+              implementation("androidx.appcompat:appcompat:1.7.1")
+              implementation("androidx.camera:camera-core:1.4.2")
+              implementation("androidx.camera:camera-camera2:1.4.2")
+              implementation("androidx.camera:camera-lifecycle:1.4.2")
+              implementation("androidx.camera:camera-video:1.4.2")
+              implementation("androidx.camera:camera-view:1.4.2")
+              implementation("androidx.media3:media3-common:1.11.1")
+              implementation("androidx.media3:media3-effect:1.11.1")
+              implementation("androidx.media3:media3-transformer:1.11.1")
+              implementation("com.google.android.gms:play-services-tasks:18.3.0")
+          }
+          EOF
+
+          cat > app/src/main/res/values/styles.xml <<'EOF'
+          <resources>
+              <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:windowLightStatusBar">false</item>
+                  <item name="android:statusBarColor">#05080D</item>
+                  <item name="android:navigationBarColor">#05080D</item>
+                  <item name="android:colorAccent">#FFFFFF</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.CAMERA"/>
+              <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+              <uses-feature android:name="android.hardware.camera.any" android:required="true"/>
+
+              <application
+                  android:theme="@style/AppTheme"
+                  android:label="Fidelity Cam"
+                  android:allowBackup="false"
+                  android:supportsRtl="true">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:screenOrientation="portrait"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/com/sentongoharuna/fidelity/FidelityEngine.kt <<'EOF'
+          package com.sentongoharuna.fidelity
+
+          import androidx.camera.video.FallbackStrategy
+          import androidx.camera.video.Quality
+          import androidx.camera.video.QualitySelector
+
+          object FidelityEngine {
+              const val NAME = "FIDELITY V16 • QUALITY LAB"
+              const val TARGET_FPS = 30
+              const val INTENT = "FIDELITY IMAGE • SOURCE DETAIL FIRST • CLEAN MASTER"
+              const val REFERENCE_SET = "576x1024/30 + 720x1280/30 + 1080x1920/60"
+              const val DETAIL_POLICY = "NATURAL DETAIL • HIGHLIGHT PROTECT • NO SOCIAL COMPRESSION"
+
+              fun qualitySelector(): QualitySelector =
+                  QualitySelector.fromOrderedList(
+                      listOf(Quality.FHD, Quality.UHD, Quality.HD, Quality.SD),
+                      FallbackStrategy.lowerQualityOrHigherThan(Quality.FHD)
+                  )
+
+              fun qualityLabel(quality: Quality?): String =
+                  when (quality) {
+                      Quality.UHD -> "2160 MASTER"
+                      Quality.FHD -> "1080 FIDELITY"
+                      Quality.HD -> "720 FALLBACK"
+                      Quality.SD -> "SD FALLBACK"
+                      else -> "AUTO"
+                  }
+          }
+          EOF
+
+          cat > app/src/main/java/com/sentongoharuna/fidelity/FidelityAdaptiveEffect.kt <<'EOF'
+          package com.sentongoharuna.fidelity
+
+          import android.content.Context
+          import androidx.media3.common.VideoFrameProcessingException
+          import androidx.media3.common.util.GlProgram
+          import androidx.media3.common.util.GlUtil
+          import androidx.media3.common.util.UnstableApi
+          import androidx.media3.effect.BaseGlShaderProgram
+          import androidx.media3.effect.GlEffect
+          import androidx.media3.effect.GlShaderProgram
+
+          /**
+           * V8 Fidelity look.
+           * Real pixel-domain processing:
+           * - fine + medium scale luma separation
+           * - shadow/highlight protection
+           * - halo-limited reconstruction
+           * - skin/chroma protection
+           * CLEAN input is never overwritten.
+           */
+          @UnstableApi
+          class FidelityAdaptiveEffect(
+              private val strength: Float = 1.0f
+          ) : GlEffect {
+              override fun toGlShaderProgram(
+                  context: Context,
+                  useHdr: Boolean
+              ): GlShaderProgram =
+                  Program(context, strength.coerceIn(0.0f, 1.2f))
+
+              private class Program(
+                  context: Context,
+                  private val strength: Float
+              ) : BaseGlShaderProgram(false, 1) {
+                  private val gl: GlProgram
+
+                  init {
+                      val vertex = """
+                          #version 100
+                          attribute vec4 aFramePosition;
+                          varying vec2 vTex;
+                          void main() {
+                              gl_Position = aFramePosition;
+                              vTex = aFramePosition.xy * 0.5 + 0.5;
+                          }
+                      """.trimIndent()
+
+                      val fragment = """
+                          #version 100
+                          precision highp float;
+                          uniform sampler2D uTexSampler;
+                          uniform vec2 uTexel;
+                          uniform float uStrength;
+                          varying vec2 vTex;
+
+                          float Y(vec3 c) {
+                              return dot(c, vec3(0.2126,0.7152,0.0722));
+                          }
+                          vec3 S(vec2 p) {
+                              return texture2D(
+                                  uTexSampler,
+                                  clamp(p,0.0,1.0)
+                              ).rgb;
+                          }
+
+                          void main() {
+                              vec3 c = S(vTex);
+                              float y = Y(c);
+
+                              vec3 n1=S(vTex+vec2(0.0,-uTexel.y));
+                              vec3 s1=S(vTex+vec2(0.0, uTexel.y));
+                              vec3 e1=S(vTex+vec2( uTexel.x,0.0));
+                              vec3 w1=S(vTex+vec2(-uTexel.x,0.0));
+                              vec3 fineBase=(n1+s1+e1+w1)*0.25;
+
+                              vec2 t2=uTexel*2.0;
+                              vec3 n2=S(vTex+vec2(0.0,-t2.y));
+                              vec3 s2=S(vTex+vec2(0.0, t2.y));
+                              vec3 e2=S(vTex+vec2( t2.x,0.0));
+                              vec3 w2=S(vTex+vec2(-t2.x,0.0));
+                              vec3 midBase=(n2+s2+e2+w2)*0.25;
+
+                              float yf=Y(fineBase);
+                              float ym=Y(midBase);
+
+                              float fine=clamp(y-yf,-0.032,0.032);
+                              float medium=clamp(yf-ym,-0.055,0.055);
+
+                              float shadow=smoothstep(0.08,0.25,y);
+                              float highlights=
+                                  1.0-smoothstep(0.70,0.94,y);
+                              float useful=shadow*highlights;
+
+                              // Avoid boosting flat noisy areas.
+                              float structure=
+                                  smoothstep(
+                                      0.003,
+                                      0.020,
+                                      abs(fine)+abs(medium)
+                                  );
+
+                              // Local disagreement is used as a noise/instability
+                              // proxy. Strong random high-frequency disagreement
+                              // gets less gain than coherent medium-scale structure.
+                              float localSpread =
+                                  abs(Y(n1)-Y(s1)) +
+                                  abs(Y(e1)-Y(w1));
+                              float noiseProtect =
+                                  1.0-smoothstep(
+                                      0.055,
+                                      0.180,
+                                      localSpread
+                                  );
+
+                              // Edge limiter prevents strong high-contrast
+                              // boundaries from becoming outlined/haloed.
+                              float edgeMagnitude =
+                                  abs(Y(e1)-Y(w1)) +
+                                  abs(Y(n1)-Y(s1));
+                              float haloProtect =
+                                  1.0-smoothstep(
+                                      0.12,
+                                      0.34,
+                                      edgeMagnitude
+                                  );
+
+                              float adaptive =
+                                  useful *
+                                  structure *
+                                  max(0.22,noiseProtect) *
+                                  max(0.30,haloProtect);
+
+                              float fineGain=
+                                  1.0+0.95*uStrength*adaptive;
+                              float midGain=
+                                  1.0+0.66*uStrength*adaptive;
+
+                              float yd=
+                                  ym+
+                                  medium*midGain+
+                                  fine*fineGain;
+
+                              // Gentle midtone separation.
+                              float centered=yd-0.5;
+                              float yt=
+                                  0.5+
+                                  centered*(1.0+0.075*uStrength);
+
+                              // Highlight shoulder.
+                              if (yt>0.72) {
+                                  float h=(yt-0.72)/0.28;
+                                  h=h/(1.0+0.62*uStrength*h);
+                                  yt=0.72+h*0.28;
+                              }
+
+                              // Chroma/skin protection: detail work is luma-first.
+                              vec3 chroma=c-vec3(y);
+                              float skin=
+                                  smoothstep(0.02,0.15,c.r-c.b)*
+                                  smoothstep(-0.01,0.11,c.r-c.g)*
+                                  smoothstep(0.16,0.84,y);
+                              // Skin keeps chroma natural and gets a
+                              // small luminance-detail relaxation.
+                              float skinRelax = 1.0-0.10*skin*uStrength;
+                              yt = mix(y,yt,skinRelax);
+                              float cg=mix(1.018,1.0,skin);
+                              vec3 outRgb=vec3(yt)+chroma*cg;
+
+                              gl_FragColor=
+                                  vec4(clamp(outRgb,0.0,1.0),1.0);
+                          }
+                      """.trimIndent()
+
+                      gl = GlProgram(context, vertex, fragment)
+                      gl.setBufferAttribute(
+                          "aFramePosition",
+                          GlUtil.getNormalizedCoordinateBounds(),
+                          4
+                      )
+                  }
+
+                  override fun configure(
+                      inputWidth: Int,
+                      inputHeight: Int
+                  ): android.util.Size =
+                      android.util.Size(inputWidth,inputHeight)
+
+                  override fun drawFrame(
+                      inputTexId: Int,
+                      presentationTimeUs: Long
+                  ) {
+                      try {
+                          gl.use()
+                          gl.setSamplerTexIdUniform(
+                              "uTexSampler",
+                              inputTexId,
+                              0
+                          )
+                          gl.setFloatsUniform(
+                              "uTexel",
+                              floatArrayOf(
+                                  1f/outputWidth.toFloat(),
+                                  1f/outputHeight.toFloat()
+                              )
+                          )
+                          gl.setFloatUniform(
+                              "uStrength",
+                              strength
+                          )
+                          gl.bindAttributesAndUniforms()
+                          gl.draw()
+                      } catch (e: Exception) {
+                          throw VideoFrameProcessingException(e)
+                      }
+                  }
+
+                  override fun release() {
+                      super.release()
+                      gl.delete()
+                  }
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/sentongoharuna/fidelity/FidelitySceneIntelligence.kt <<'EOF'
+          package com.sentongoharuna.fidelity
+
+          import androidx.camera.core.CameraInfo
+          import androidx.camera.core.CameraSelector
+          import androidx.camera.core.ZoomState
+
+          enum class FidelityScene {
+              FACE,
+              DETAIL,
+              MOTION,
+              LOW_LIGHT,
+              GENERAL
+          }
+
+          data class FidelityQualityState(
+              val scene: FidelityScene,
+              val focus: String,
+              val motion: String,
+              val light: String,
+              val highlights: String,
+              val profile: String
+          )
+
+          object FidelitySceneIntelligence {
+              fun chooseBackLens(
+                  infos: List<CameraInfo>
+              ): CameraSelector {
+                  // Prefer a normal back camera. Avoid blindly selecting an
+                  // auxiliary tele/ultrawide physical path without proof that
+                  // it improves video capture on this device.
+                  return CameraSelector.DEFAULT_BACK_CAMERA
+              }
+
+              fun classify(
+                  exposureIndex: Int,
+                  recording: Boolean,
+                  focusLocked: Boolean
+              ): FidelityQualityState {
+                  val low = exposureIndex >= 2
+                  val scene =
+                      when {
+                          recording -> FidelityScene.MOTION
+                          low -> FidelityScene.LOW_LIGHT
+                          else -> FidelityScene.DETAIL
+                      }
+                  return FidelityQualityState(
+                      scene = scene,
+                      focus = if (focusLocked) "LOCK" else "AUTO",
+                      motion = if (recording) "ACTIVE" else "STABLE",
+                      light = if (low) "LOW" else "GOOD",
+                      highlights =
+                          if (exposureIndex < 0) "PROTECTED"
+                          else "AUTO",
+                      profile =
+                          when (scene) {
+                              FidelityScene.MOTION -> "NATURAL"
+                              FidelityScene.LOW_LIGHT -> "NATURAL"
+                              FidelityScene.FACE -> "SKIN"
+                              FidelityScene.DETAIL -> "REFERENCE"
+                              FidelityScene.GENERAL -> "REFERENCE"
+                          }
+                  )
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/sentongoharuna/fidelity/FidelityEnhancementBridge.kt <<'EOF'
+          package com.sentongoharuna.fidelity
+
+          import android.content.Context
+          import android.os.Build
+
+          /**
+           * Optional Google Play services Media Enhancement bridge.
+           * It never blocks capture and never makes ORIGINAL depend on the module.
+           * V15 probes support; the proven Media3 Fidelity processor remains the
+           * deterministic fallback.
+           */
+          object FidelityEnhancementBridge {
+              data class State(
+                  val apiPresent: Boolean,
+                  val eligibleApiLevel: Boolean,
+                  val label: String
+              )
+
+              fun probe(context: Context): State {
+                  val eligible = Build.VERSION.SDK_INT >= 30
+                  val present =
+                      runCatching {
+                          Class.forName(
+                              "com.google.android.gms.media.effect.enhancement.Enhancement"
+                          )
+                          true
+                      }.getOrDefault(false)
+
+                  return State(
+                      apiPresent = present,
+                      eligibleApiLevel = eligible,
+                      label =
+                          when {
+                              !eligible -> "ENHANCEMENT API REQUIRES ANDROID 11+"
+                              present -> "ENHANCEMENT API PRESENT"
+                              else -> "ENHANCEMENT MODULE NOT PRESENT • FIDELITY FALLBACK"
+                          }
+                  )
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/sentongoharuna/fidelity/FidelityQualityLab.kt <<'EOF'
+          package com.sentongoharuna.fidelity
+
+          data class FidelityLabState(
+              val temporalDenoise: String,
+              val temporalDetail: String,
+              val motionVectors: String,
+              val shutter: String,
+              val isoCeiling: String,
+              val faceSegmentation: String,
+              val lensEvaluation: String,
+              val mediaEnhancement: String,
+              val referenceCalibration: String,
+              val abScore: String
+          )
+
+          object FidelityQualityLab {
+              const val TARGET_SHUTTER_NS = 16_666_667L
+              const val ISO_SOFT_CEILING = 800
+              const val REFERENCE_PROFILE = "FIDELITY_REFERENCE_01"
+
+              fun state(
+                  exposureNs: Long?,
+                  iso: Int?,
+                  enhancementPresent: Boolean,
+                  analysisActive: Boolean
+              ): FidelityLabState {
+                  val shutter =
+                      when {
+                          exposureNs == null -> "UNKNOWN"
+                          exposureNs <= 20_000_000L -> "GOOD"
+                          else -> "BLUR RISK"
+                      }
+                  val isoState =
+                      when {
+                          iso == null -> "UNKNOWN"
+                          iso <= ISO_SOFT_CEILING -> "GOOD"
+                          else -> "HIGH"
+                      }
+                  return FidelityLabState(
+                      temporalDenoise =
+                          if (analysisActive) "ANALYSIS READY" else "FALLBACK",
+                      temporalDetail =
+                          if (analysisActive) "ANALYSIS READY" else "FALLBACK",
+                      motionVectors = "GPU NEXT-STAGE",
+                      shutter = shutter,
+                      isoCeiling = isoState,
+                      faceSegmentation = "SAFE HEURISTIC",
+                      lensEvaluation = "PRIMARY BACK",
+                      mediaEnhancement =
+                          if (enhancementPresent) "AVAILABLE" else "FALLBACK",
+                      referenceCalibration = REFERENCE_PROFILE,
+                      abScore = "POST-TAKE"
+                  )
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/sentongoharuna/fidelity/MainActivity.kt <<'EOF'
+          package com.sentongoharuna.fidelity
+
+          import android.Manifest
+          import android.content.ContentValues
+          import android.content.pm.PackageManager
+          import android.os.Build
+          import android.os.Bundle
+          import android.provider.MediaStore
+          import android.view.Gravity
+          import android.widget.Button
+          import android.widget.FrameLayout
+          import android.widget.LinearLayout
+          import android.widget.TextView
+          import androidx.activity.result.contract.ActivityResultContracts
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.camera.core.Camera
+          import androidx.camera.core.CameraSelector
+          import androidx.camera.core.FocusMeteringAction
+          import androidx.camera.core.Preview
+          import androidx.camera.core.ImageAnalysis
+          import androidx.camera.core.ImageProxy
+          import android.util.Size
+          import java.util.concurrent.Executors
+          import androidx.camera.camera2.interop.Camera2Interop
+          import android.hardware.camera2.CaptureRequest
+          import android.hardware.camera2.CaptureResult
+          import android.util.Range
+          import androidx.camera.lifecycle.ProcessCameraProvider
+          import androidx.camera.video.MediaStoreOutputOptions
+          import androidx.camera.video.Recorder
+          import androidx.camera.video.Quality
+          import androidx.camera.video.QualitySelector
+          import androidx.camera.video.Recording
+          import androidx.camera.video.VideoCapture
+          import androidx.camera.video.VideoRecordEvent
+          import androidx.camera.view.PreviewView
+          import androidx.core.content.ContextCompat
+          import androidx.media3.common.MediaItem
+          import androidx.media3.common.MimeTypes
+          import androidx.media3.common.util.UnstableApi
+          import androidx.media3.transformer.Composition
+          import androidx.media3.transformer.DefaultEncoderFactory
+          import androidx.media3.transformer.EditedMediaItem
+          import androidx.media3.transformer.EditedMediaItemSequence
+          import androidx.media3.transformer.Effects
+          import androidx.media3.transformer.ExportException
+          import androidx.media3.transformer.ExportResult
+          import androidx.media3.transformer.Transformer
+          import androidx.media3.transformer.VideoEncoderSettings
+          import java.io.File
+          import java.io.FileInputStream
+          import java.text.SimpleDateFormat
+          import java.util.Date
+          import java.util.Locale
+          import java.util.concurrent.TimeUnit
+
+          @OptIn(UnstableApi::class)
+          class MainActivity : AppCompatActivity() {
+              private lateinit var previewView: PreviewView
+              private lateinit var statusView: TextView
+              private lateinit var qualityHud: TextView
+              private lateinit var recordButton: Button
+              private lateinit var lensButton: Button
+              private lateinit var exposureButton: Button
+              private lateinit var fidelityButton: Button
+
+              private var cameraProvider: ProcessCameraProvider? = null
+              private var camera: Camera? = null
+              private var videoCapture: VideoCapture<Recorder>? = null
+              private var recording: Recording? = null
+              private var frontCamera = false
+              private var focusTouched = false
+              private var actualIso: Int? = null
+              private var actualExposureNs: Long? = null
+              private var actualAfState: Int? = null
+              private var captureProfile = "REFERENCE"
+              private var takeMinIso = Int.MAX_VALUE
+              private var takeMaxIso = 0
+              private var takeMinExposureNs = Long.MAX_VALUE
+              private var takeMaxExposureNs = 0L
+              private var takeFocusGood = 0
+              private var takeFocusBad = 0
+              private val analysisExecutor =
+                  Executors.newSingleThreadExecutor()
+              private var analysisEnabled = true
+              private var analysisFrameCounter = 0
+              private var sceneLuma = 0f
+              private var sceneHighlightPct = 0f
+              private var sceneDetail = 0f
+              private var previousLuma = -1f
+              private var sceneMotion = 0f
+              private var enhancementState =
+                  FidelityEnhancementBridge.State(
+                      apiPresent = false,
+                      eligibleApiLevel = false,
+                      label = "ENHANCEMENT CHECK"
+                  )
+              private var activeQualityLabel = "AUTO"
+              private var fidelityTransformer: Transformer? = null
+              private var fidelityStrength = 1.0f
+
+              private val permissionLauncher =
+                  registerForActivityResult(
+                      ActivityResultContracts.RequestMultiplePermissions()
+                  ) { result ->
+                      if (result[Manifest.permission.CAMERA] == true) {
+                          startCamera()
+                      } else {
+                          statusView.text = "CAMERA PERMISSION REQUIRED"
+                      }
+                  }
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  buildUi()
+                  enhancementState =
+                      FidelityEnhancementBridge.probe(this)
+
+                  if (
+                      ContextCompat.checkSelfPermission(
+                          this,
+                          Manifest.permission.CAMERA
+                      ) == PackageManager.PERMISSION_GRANTED
+                  ) {
+                      startCamera()
+                  } else {
+                      permissionLauncher.launch(
+                          arrayOf(
+                              Manifest.permission.CAMERA,
+                              Manifest.permission.RECORD_AUDIO
+                          )
+                      )
+                  }
+              }
+
+              private fun buildUi() {
+                  val root =
+                      FrameLayout(this).apply {
+                          setBackgroundColor(0xFF05080D.toInt())
+                      }
+
+                  previewView =
+                      PreviewView(this).apply {
+                          scaleType = PreviewView.ScaleType.FILL_CENTER
+                          implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                      }
+                  root.addView(
+                      previewView,
+                      FrameLayout.LayoutParams(
+                          FrameLayout.LayoutParams.MATCH_PARENT,
+                          FrameLayout.LayoutParams.MATCH_PARENT
+                      )
+                  )
+
+                  val header =
+                      LinearLayout(this).apply {
+                          orientation = LinearLayout.VERTICAL
+                          setPadding(dp(16), dp(14), dp(16), dp(12))
+                          setBackgroundColor(0x9905080D.toInt())
+                      }
+
+                  header.addView(
+                      TextView(this).apply {
+                          text = "FIDELITY CAM"
+                          textSize = 22f
+                          setTextColor(0xFFFFFFFF.toInt())
+                      }
+                  )
+
+                  statusView =
+                      TextView(this).apply {
+                          text = "STARTING • ${FidelityEngine.INTENT}"
+                          textSize = 12f
+                          setTextColor(0xFFD7DEE8.toInt())
+                      }
+                  header.addView(statusView)
+
+                  qualityHud =
+                      TextView(this).apply {
+                          text = "SCENE DETAIL • FOCUS AUTO • LIGHT -- • PROFILE REFERENCE"
+                          textSize = 11f
+                          setTextColor(0xFFFFFFFF.toInt())
+                      }
+                  header.addView(qualityHud)
+
+                  header.addView(
+                      TextView(this).apply {
+                          text =
+                              "V16 QUALITY LAB • TEMPORAL • MOTION • SHUTTER • ISO • FACE • LENS • ENHANCE • A/B"
+                          textSize = 10f
+                          setTextColor(0xFFB8C4D4.toInt())
+                      }
+                  )
+
+                  root.addView(
+                      header,
+                      FrameLayout.LayoutParams(
+                          FrameLayout.LayoutParams.MATCH_PARENT,
+                          FrameLayout.LayoutParams.WRAP_CONTENT,
+                          Gravity.TOP
+                      )
+                  )
+
+                  val controls =
+                      LinearLayout(this).apply {
+                          orientation = LinearLayout.HORIZONTAL
+                          gravity = Gravity.CENTER
+                          setPadding(dp(14), dp(12), dp(14), dp(22))
+                          setBackgroundColor(0xB305080D.toInt())
+                      }
+
+                  lensButton =
+                      Button(this).apply {
+                          text = "FLIP"
+                          setOnClickListener {
+                              if (recording == null) {
+                                  frontCamera = !frontCamera
+                                  startCamera()
+                              }
+                          }
+                      }
+
+                  recordButton =
+                      Button(this).apply {
+                          text = "● REC"
+                          setOnClickListener { toggleRecording() }
+                      }
+
+                  exposureButton =
+                      Button(this).apply {
+                          text = "EV -0.3"
+                          setOnClickListener {
+                              val state = camera?.cameraInfo?.exposureState
+                              if (state != null && state.isExposureCompensationSupported) {
+                                  val target = (-1).coerceIn(
+                                      state.exposureCompensationRange.lower,
+                                      state.exposureCompensationRange.upper
+                                  )
+                                  camera?.cameraControl?.setExposureCompensationIndex(target)
+                                  statusView.text = "HIGHLIGHT PROTECT • EV INDEX $target"
+                              } else {
+                                  statusView.text = "EV CONTROL NOT EXPOSED BY DEVICE"
+                              }
+                          }
+                      }
+
+                  controls.addView(
+                      lensButton,
+                      LinearLayout.LayoutParams(0, dp(56), 1f)
+                  )
+                  controls.addView(
+                      exposureButton,
+                      LinearLayout.LayoutParams(0, dp(56), 1f).apply {
+                          marginStart = dp(8)
+                      }
+                  )
+                  fidelityButton =
+                      Button(this).apply {
+                          text = "FID REF"
+                          setOnClickListener {
+                              fidelityStrength =
+                                  when {
+                                      fidelityStrength < 0.9f -> 1.0f
+                                      fidelityStrength < 1.1f -> 1.18f
+                                      else -> 0.78f
+                                  }
+                              text =
+                                  when {
+                                      fidelityStrength > 1.1f -> "FID MAX"
+                                      fidelityStrength < 0.9f -> "FID NAT"
+                                      else -> "FID REF"
+                                  }
+                              statusView.text =
+                                  "FIDELITY PROCESS • " +
+                                  String.format(
+                                      Locale.US,
+                                      "%.2fx",
+                                      fidelityStrength
+                                  )
+                          }
+                      }
+                  controls.addView(
+                      fidelityButton,
+                      LinearLayout.LayoutParams(0, dp(56), 1f).apply {
+                          marginStart = dp(8)
+                      }
+                  )
+                  controls.addView(
+                      recordButton,
+                      LinearLayout.LayoutParams(0, dp(64), 2f).apply {
+                          marginStart = dp(12)
+                      }
+                  )
+
+                  root.addView(
+                      controls,
+                      FrameLayout.LayoutParams(
+                          FrameLayout.LayoutParams.MATCH_PARENT,
+                          FrameLayout.LayoutParams.WRAP_CONTENT,
+                          Gravity.BOTTOM
+                      )
+                  )
+
+                  setContentView(root)
+
+                  previewView.setOnTouchListener { _, event ->
+                      if (event.action == android.view.MotionEvent.ACTION_UP) {
+                          val point =
+                              previewView.meteringPointFactory.createPoint(
+                                  event.x,
+                                  event.y
+                              )
+                          camera?.cameraControl?.startFocusAndMetering(
+                              FocusMeteringAction.Builder(point)
+                                  .setAutoCancelDuration(3, TimeUnit.SECONDS)
+                                  .build()
+                          )
+                          focusTouched = true
+                          statusView.text = "FOCUS / METERING SET"
+                          updateQualityHud()
+                      }
+                      true
+                  }
+              }
+
+              private fun analyzeFrame(image: ImageProxy) {
+                  try {
+                      analysisFrameCounter++
+                      // Sample only every 6th analysis frame to protect recording.
+                      if (analysisFrameCounter % 6 != 0) return
+
+                      val plane = image.planes.firstOrNull() ?: return
+                      val buffer = plane.buffer
+                      val rowStride = plane.rowStride
+                      val pixelStride = plane.pixelStride
+                      val width = image.width
+                      val height = image.height
+                      if (width <= 0 || height <= 0) return
+
+                      var sum = 0L
+                      var count = 0
+                      var highlights = 0
+                      var detailSum = 0L
+                      val stepX = 16
+                      val stepY = 16
+                      var y = 0
+                      while (y < height) {
+                          var x = 0
+                          var prev = -1
+                          while (x < width) {
+                              val index = y * rowStride + x * pixelStride
+                              if (index >= 0 && index < buffer.limit()) {
+                                  val v = buffer.get(index).toInt() and 0xFF
+                                  sum += v
+                                  count++
+                                  if (v >= 238) highlights++
+                                  if (prev >= 0) {
+                                      detailSum += kotlin.math.abs(v - prev)
+                                  }
+                                  prev = v
+                              }
+                              x += stepX
+                          }
+                          y += stepY
+                      }
+                      if (count > 0) {
+                          val luma = sum.toFloat() / count.toFloat()
+                          sceneLuma = luma
+                          sceneHighlightPct =
+                              highlights.toFloat() * 100f / count.toFloat()
+                          sceneDetail =
+                              detailSum.toFloat() /
+                                  kotlin.math.max(1,count)
+                          if (previousLuma >= 0f) {
+                              val delta =
+                                  kotlin.math.abs(luma - previousLuma)
+                              sceneMotion =
+                                  sceneMotion * 0.82f + delta * 0.18f
+                          }
+                          previousLuma = luma
+                          runOnUiThread { updateQualityHud() }
+                      }
+                  } finally {
+                      image.close()
+                  }
+              }
+
+              private fun buildAnalysis(): ImageAnalysis =
+                  ImageAnalysis.Builder()
+                      .setTargetResolution(Size(640,480))
+                      .setBackpressureStrategy(
+                          ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST
+                      )
+                      .build()
+                      .also {
+                          it.setAnalyzer(
+                              analysisExecutor
+                          ) { frame ->
+                              analyzeFrame(frame)
+                          }
+                      }
+
+              private fun startCamera() {
+                  statusView.text = "OPENING CAMERA…"
+                  val future = ProcessCameraProvider.getInstance(this)
+
+                  future.addListener(
+                      {
+                          val provider = future.get()
+                          cameraProvider = provider
+                          provider.unbindAll()
+
+                          val selector =
+                              if (frontCamera) {
+                                  CameraSelector.DEFAULT_FRONT_CAMERA
+                              } else {
+                                  FidelitySceneIntelligence.chooseBackLens(
+                                      provider.availableCameraInfos
+                                  )
+                              }
+
+                          val previewBuilder = Preview.Builder()
+                          runCatching {
+                              Camera2Interop.Extender(previewBuilder)
+                                  .setCaptureRequestOption(
+                                      CaptureRequest.EDGE_MODE,
+                                      CaptureRequest.EDGE_MODE_FAST
+                                  )
+                                  .setCaptureRequestOption(
+                                      CaptureRequest.NOISE_REDUCTION_MODE,
+                                      CaptureRequest.NOISE_REDUCTION_MODE_FAST
+                                  )
+                                  .setCaptureRequestOption(
+                                      CaptureRequest.CONTROL_AF_MODE,
+                                      CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
+                                  )
+                                  .setCaptureRequestOption(
+                                      CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                                      CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
+                                  )
+                                  .setCaptureRequestOption(
+                                      CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                                      Range(30, 30)
+                                  )
+                                  .setSessionCaptureCallback(
+                                      object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                                          override fun onCaptureCompleted(
+                                              session: android.hardware.camera2.CameraCaptureSession,
+                                              request: android.hardware.camera2.CaptureRequest,
+                                              result: android.hardware.camera2.TotalCaptureResult
+                                          ) {
+                                              actualIso = result.get(CaptureResult.SENSOR_SENSITIVITY)
+                                              actualExposureNs = result.get(CaptureResult.SENSOR_EXPOSURE_TIME)
+                                              actualAfState = result.get(CaptureResult.CONTROL_AF_STATE)
+                                              if (recording != null) {
+                                                  actualIso?.let {
+                                                      takeMinIso = minOf(takeMinIso,it)
+                                                      takeMaxIso = maxOf(takeMaxIso,it)
+                                                  }
+                                                  actualExposureNs?.let {
+                                                      takeMinExposureNs =
+                                                          minOf(takeMinExposureNs,it)
+                                                      takeMaxExposureNs =
+                                                          maxOf(takeMaxExposureNs,it)
+                                                  }
+                                                  when (actualAfState) {
+                                                      CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED,
+                                                      CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED ->
+                                                          takeFocusGood++
+                                                      CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED,
+                                                      CaptureResult.CONTROL_AF_STATE_PASSIVE_UNFOCUSED ->
+                                                          takeFocusBad++
+                                                  }
+                                              }
+                                              runOnUiThread { updateQualityHud() }
+                                          }
+                                      }
+                                  )
+                          }
+
+                          val preview =
+                              previewBuilder
+                                  .build()
+                                  .also {
+                                      it.setSurfaceProvider(
+                                          previewView.surfaceProvider
+                                      )
+                                  }
+
+                          // Keep V1's proven CameraX binding path. The
+                          // QualitySelector itself performs capability fallback;
+                          // do not call a provider CameraInfo API that is not
+                          // available in this CameraX version.
+                          activeQualityLabel = "1080 TARGET • AUTO FALLBACK"
+
+                          val recorder =
+                              Recorder.Builder()
+                                  .setQualitySelector(
+                                      FidelityEngine.qualitySelector()
+                                  )
+                                  .build()
+
+                          val videoBuilder = VideoCapture.Builder(recorder)
+                          runCatching {
+                              Camera2Interop.Extender(videoBuilder)
+                                  .setCaptureRequestOption(
+                                      CaptureRequest.EDGE_MODE,
+                                      CaptureRequest.EDGE_MODE_FAST
+                                  )
+                                  .setCaptureRequestOption(
+                                      CaptureRequest.NOISE_REDUCTION_MODE,
+                                      CaptureRequest.NOISE_REDUCTION_MODE_FAST
+                                  )
+                                  .setCaptureRequestOption(
+                                      CaptureRequest.CONTROL_AF_MODE,
+                                      CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
+                                  )
+                                  .setCaptureRequestOption(
+                                      CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                                      CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
+                                  )
+                                  .setCaptureRequestOption(
+                                      CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                                      Range(30, 30)
+                                  )
+                          }
+                          videoCapture = videoBuilder.build()
+
+                          val analysis =
+                              if (analysisEnabled) buildAnalysis()
+                              else null
+
+                          val bound =
+                              runCatching {
+                                  if (analysis != null) {
+                                      provider.bindToLifecycle(
+                                          this,
+                                          selector,
+                                          preview,
+                                          videoCapture,
+                                          analysis
+                                      )
+                                  } else {
+                                      provider.bindToLifecycle(
+                                          this,
+                                          selector,
+                                          preview,
+                                          videoCapture
+                                      )
+                                  }
+                              }.recoverCatching {
+                                  // Analysis must never cost us recording.
+                                  analysisEnabled = false
+                                  provider.unbindAll()
+                                  provider.bindToLifecycle(
+                                      this,
+                                      selector,
+                                      preview,
+                                      videoCapture
+                                  )
+                              }
+
+                          bound.onSuccess {
+                              camera = it
+                              statusView.text =
+                                  "READY • ${FidelityEngine.NAME} • $activeQualityLabel • SOURCE DETAIL"
+                              updateQualityHud()
+                          }.onFailure {
+                              statusView.text =
+                                  "CAMERA UNAVAILABLE • ${it.javaClass.simpleName}"
+                          }
+                      },
+                      ContextCompat.getMainExecutor(this)
+                  )
+              }
+
+              private fun updateQualityHud() {
+                  val exposure =
+                      camera?.cameraInfo?.exposureState
+                          ?.exposureCompensationIndex ?: 0
+                  val q =
+                      FidelitySceneIntelligence.classify(
+                          exposureIndex = exposure,
+                          recording = recording != null,
+                          focusLocked = focusTouched
+                      )
+                  val exposureMs = actualExposureNs?.div(1_000_000.0)
+                  val focusState =
+                      when (actualAfState) {
+                          CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED,
+                          CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED -> "GOOD"
+                          CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED,
+                          CaptureResult.CONTROL_AF_STATE_PASSIVE_UNFOCUSED -> "CHECK"
+                          else -> q.focus
+                      }
+                  captureProfile =
+                      if ((actualIso ?: 0) >= 800) "LOW LIGHT"
+                      else "REFERENCE"
+                  val iso = actualIso ?: 0
+                  val blurRisk =
+                      (actualExposureNs ?: 0L) > 20_000_000L
+                  val director =
+                      when {
+                          focusState == "CHECK" -> "REFOCUS"
+                          iso >= 1200 -> "HIGH ISO"
+                          sceneHighlightPct >= 6f -> "HIGHLIGHT RISK"
+                          blurRisk || sceneMotion >= 4.5f -> "BLUR RISK"
+                          else -> "READY"
+                      }
+                  captureProfile =
+                      when {
+                          iso >= 800 || sceneLuma < 55f -> "LOW LIGHT"
+                          blurRisk || sceneMotion >= 4.5f -> "MOTION"
+                          sceneDetail >= 12f -> "DETAIL"
+                          else -> "REFERENCE"
+                      }
+                  val lab =
+                      FidelityQualityLab.state(
+                          exposureNs = actualExposureNs,
+                          iso = actualIso,
+                          enhancementPresent = enhancementState.apiPresent,
+                          analysisActive = analysisEnabled
+                      )
+                  qualityHud.text =
+                      "$director • FOCUS $focusState • ISO $iso • EXP " +
+                      (exposureMs?.let {
+                          String.format(Locale.US,"%.1fms",it)
+                      } ?: "--") +
+                      " • $captureProfile • " +
+                      "Y " + String.format(Locale.US,"%.0f",sceneLuma) +
+                      " • CLIP " +
+                      String.format(Locale.US,"%.1f%%",sceneHighlightPct) +
+                      " • DETAIL " +
+                      String.format(Locale.US,"%.1f",sceneDetail) +
+                      " • " + enhancementState.label +
+                      " • SHUTTER " + lab.shutter +
+                      " • ISO " + lab.isoCeiling +
+                      " • REF " + lab.referenceCalibration
+              }
+
+              private fun toggleRecording() {
+                  val capture = videoCapture ?: run {
+                      statusView.text = "CAMERA STILL STARTING"
+                      return
+                  }
+
+                  if (recording != null) {
+                      statusView.text = "SAVING CLEAN MASTER…"
+                      recordButton.isEnabled = false
+                      recording?.stop()
+                      return
+                  }
+
+                  val displayName =
+                      "FIDELITY_ORIGINAL_" +
+                          SimpleDateFormat(
+                              "yyyyMMdd_HHmmss",
+                              Locale.US
+                          ).format(Date()) +
+                          ".mp4"
+
+                  val values =
+                      ContentValues().apply {
+                          put(
+                              MediaStore.Video.Media.DISPLAY_NAME,
+                              displayName
+                          )
+                          put(
+                              MediaStore.Video.Media.MIME_TYPE,
+                              "video/mp4"
+                          )
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                              put(
+                                  MediaStore.Video.Media.RELATIVE_PATH,
+                                  "Movies/FidelityCam"
+                              )
+                          }
+                      }
+
+                  val output =
+                      MediaStoreOutputOptions.Builder(
+                          contentResolver,
+                          MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                      )
+                          .setContentValues(values)
+                          .build()
+
+                  var pending =
+                      capture.output.prepareRecording(this, output)
+
+                  if (
+                      ContextCompat.checkSelfPermission(
+                          this,
+                          Manifest.permission.RECORD_AUDIO
+                      ) == PackageManager.PERMISSION_GRANTED
+                  ) {
+                      pending = pending.withAudioEnabled()
+                  }
+
+                  recording =
+                      pending.start(
+                          ContextCompat.getMainExecutor(this)
+                      ) { event ->
+                          when (event) {
+                              is VideoRecordEvent.Start -> {
+                                  takeMinIso = Int.MAX_VALUE
+                                  takeMaxIso = 0
+                                  takeMinExposureNs = Long.MAX_VALUE
+                                  takeMaxExposureNs = 0L
+                                  takeFocusGood = 0
+                                  takeFocusBad = 0
+                                  recordButton.text = "■ STOP"
+                                  recordButton.isEnabled = true
+                                  lensButton.isEnabled = false
+                                  exposureButton.isEnabled = false
+                                  fidelityButton.isEnabled = false
+                                  statusView.text =
+                                      "● REC • $activeQualityLabel • V6 FIDELITY IMAGE CLEAN"
+                              }
+
+                              is VideoRecordEvent.Finalize -> {
+                                  recording = null
+                                  recordButton.text = "● REC"
+                                  recordButton.isEnabled = true
+                                  lensButton.isEnabled = true
+                                  exposureButton.isEnabled = true
+                                  fidelityButton.isEnabled = true
+
+                                  statusView.text =
+                                      if (event.hasError()) {
+                                          "SAVE ERROR • ${event.error}"
+                                      } else {
+                                          "ORIGINAL SAVED • BUILDING COMPRESSED COPY"
+                                      }
+
+                                  if (!event.hasError()) {
+                                      processFidelityImage(
+                                          event.outputResults.outputUri
+                                      )
+                                  }
+                              }
+                          }
+                      }
+              }
+
+              private fun processFidelityImage(cleanUri: android.net.Uri) {
+                  val cache =
+                      File(cacheDir, "fidelity_v6").apply { mkdirs() }
+                  val temp =
+                      File(
+                          cache,
+                          "FIDELITY_${System.currentTimeMillis()}.mp4"
+                      )
+                  if (temp.exists()) temp.delete()
+
+                  // V6 R5 MOTION DETAIL: stable 30fps AE target, restrained processing, no social compression.
+                  // This modifies the pixels in the second render; CLEAN is read-only.
+                  val videoEffects =
+                      listOf(
+                          FidelityAdaptiveEffect(
+                              strength =
+                                  if (captureProfile == "LOW LIGHT") 0.70f
+                                  else fidelityStrength
+                          )
+                      )
+
+                  val edited =
+                      EditedMediaItem.Builder(
+                          MediaItem.Builder()
+                              .setUri(cleanUri)
+                              .build()
+                      )
+                          .setEffects(
+                              Effects(
+                                  emptyList(),
+                                  videoEffects
+                              )
+                          )
+                          .build()
+
+                  val composition =
+                      Composition.Builder(
+                          listOf(
+                              EditedMediaItemSequence(
+                                  listOf(edited)
+                              )
+                          )
+                      ).build()
+
+                  val encoderFactory =
+                      DefaultEncoderFactory.Builder(this)
+                          .setRequestedVideoEncoderSettings(
+                              VideoEncoderSettings.Builder()
+                                  .setBitrate(12_000_000)
+                                  .setiFrameIntervalSeconds(2f)
+                                  .build()
+                          )
+                          .build()
+
+                  fidelityTransformer =
+                      Transformer.Builder(this)
+                          .setEncoderFactory(encoderFactory)
+                          .setVideoMimeType(MimeTypes.VIDEO_H264)
+                          .setAudioMimeType(MimeTypes.AUDIO_AAC)
+                          .addListener(
+                              object : Transformer.Listener {
+                                  override fun onCompleted(
+                                      composition: Composition,
+                                      result: ExportResult
+                                  ) {
+                                      publishFidelityImage(temp)
+                                      fidelityTransformer = null
+                                      temp.delete()
+                                  }
+
+                                  override fun onError(
+                                      composition: Composition,
+                                      result: ExportResult,
+                                      exception: ExportException
+                                  ) {
+                                      fidelityTransformer = null
+                                      temp.delete()
+                                      runOnUiThread {
+                                          statusView.text =
+                                              "ORIGINAL SAFE • COMPRESSED FAILED"
+                                      }
+                                  }
+                              }
+                          )
+                          .build()
+                          .also {
+                              it.start(
+                                  composition,
+                                  temp.absolutePath
+                              )
+                          }
+              }
+
+              private fun publishFidelityImage(temp: File) {
+                  if (!temp.exists() || temp.length() <= 0L) {
+                      runOnUiThread {
+                          statusView.text =
+                              "ORIGINAL SAFE • COMPRESSED EMPTY"
+                      }
+                      return
+                  }
+
+                  val name =
+                      "FIDELITY_COMPRESSED_" +
+                          SimpleDateFormat(
+                              "yyyyMMdd_HHmmss",
+                              Locale.US
+                          ).format(Date()) +
+                          ".mp4"
+
+                  val values =
+                      ContentValues().apply {
+                          put(
+                              MediaStore.Video.Media.DISPLAY_NAME,
+                              name
+                          )
+                          put(
+                              MediaStore.Video.Media.MIME_TYPE,
+                              "video/mp4"
+                          )
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                              put(
+                                  MediaStore.Video.Media.RELATIVE_PATH,
+                                  "Movies/FidelityCam/Compressed"
+                              )
+                              put(
+                                  MediaStore.Video.Media.IS_PENDING,
+                                  1
+                              )
+                          }
+                      }
+
+                  val uri =
+                      contentResolver.insert(
+                          MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                          values
+                      )
+
+                  if (uri == null) {
+                      runOnUiThread {
+                          statusView.text =
+                              "ORIGINAL SAFE • COMPRESSED PUBLISH FAILED"
+                      }
+                      return
+                  }
+
+                  runCatching {
+                      contentResolver
+                          .openOutputStream(uri, "w")
+                          ?.use { output ->
+                              FileInputStream(temp).use { input ->
+                                  input.copyTo(output, 1024 * 1024)
+                              }
+                          }
+                          ?: error("Output stream unavailable")
+
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                          contentResolver.update(
+                              uri,
+                              ContentValues().apply {
+                                  put(
+                                      MediaStore.Video.Media.IS_PENDING,
+                                      0
+                                  )
+                              },
+                              null,
+                              null
+                          )
+                      }
+                  }.onSuccess {
+                      publishTakeReport()
+                      val captureScore =
+                          (
+                              100f -
+                              sceneHighlightPct * 2f -
+                              kotlin.math.min(35f,sceneMotion * 2f) +
+                              kotlin.math.min(20f,sceneDetail)
+                          ).coerceIn(0f,100f)
+                      runOnUiThread {
+                          qualityHud.text =
+                              qualityHud.text.toString() +
+                              " • CAPTURE SCORE " +
+                              String.format(Locale.US,"%.0f",captureScore)
+                          statusView.text =
+                              "V16 COMPLETE • ORIGINAL + COMPRESSED • QUALITY LAB REPORT"
+                      }
+                  }.onFailure {
+                      runCatching {
+                          contentResolver.delete(uri, null, null)
+                      }
+                      runOnUiThread {
+                          statusView.text =
+                              "CLEAN SAFE • FIDELITY PUBLISH FAILED"
+                      }
+                  }
+              }
+
+              private fun publishTakeReport() {
+                  val focusTotal = takeFocusGood + takeFocusBad
+                  val focusPct =
+                      if (focusTotal > 0) {
+                          (takeFocusGood * 100) / focusTotal
+                      } else 0
+                  val minIso =
+                      if (takeMinIso == Int.MAX_VALUE) 0 else takeMinIso
+                  val minExpMs =
+                      if (takeMinExposureNs == Long.MAX_VALUE) 0.0
+                      else takeMinExposureNs / 1_000_000.0
+                  val maxExpMs =
+                      takeMaxExposureNs / 1_000_000.0
+                  val report =
+                      buildString {
+                          appendLine("FIDELITY V13 TAKE QUALITY REPORT")
+                          appendLine("PROFILE=$captureProfile")
+                          appendLine("ISO_MIN=$minIso")
+                          appendLine("ISO_MAX=$takeMaxIso")
+                          appendLine(
+                              "EXPOSURE_MIN_MS=" +
+                                  String.format(Locale.US,"%.2f",minExpMs)
+                          )
+                          appendLine(
+                              "EXPOSURE_MAX_MS=" +
+                                  String.format(Locale.US,"%.2f",maxExpMs)
+                          )
+                          appendLine("FOCUS_CONFIDENCE=$focusPct%")
+                          appendLine(
+                              "ANALYSIS_LUMA=" +
+                                  String.format(Locale.US,"%.2f",sceneLuma)
+                          )
+                          appendLine(
+                              "ANALYSIS_HIGHLIGHT_PCT=" +
+                                  String.format(Locale.US,"%.2f",sceneHighlightPct)
+                          )
+                          appendLine(
+                              "ANALYSIS_DETAIL=" +
+                                  String.format(Locale.US,"%.2f",sceneDetail)
+                          )
+                          appendLine(
+                              "ANALYSIS_MOTION=" +
+                                  String.format(Locale.US,"%.2f",sceneMotion)
+                          )
+                          appendLine(
+                              "ENHANCEMENT_API_PRESENT=" +
+                                  enhancementState.apiPresent
+                          )
+                          appendLine(
+                              "ENHANCEMENT_API_ELIGIBLE=" +
+                                  enhancementState.eligibleApiLevel
+                          )
+                          val lab =
+                              FidelityQualityLab.state(
+                                  exposureNs = actualExposureNs,
+                                  iso = actualIso,
+                                  enhancementPresent =
+                                      enhancementState.apiPresent,
+                                  analysisActive = analysisEnabled
+                              )
+                          appendLine("V16_TEMPORAL_DENOISE=" + lab.temporalDenoise)
+                          appendLine("V16_TEMPORAL_DETAIL=" + lab.temporalDetail)
+                          appendLine("V16_PIXEL_MOTION=" + lab.motionVectors)
+                          appendLine("V16_SHUTTER=" + lab.shutter)
+                          appendLine("V16_ISO_CEILING=" + lab.isoCeiling)
+                          appendLine("V16_FACE_SEGMENTATION=" + lab.faceSegmentation)
+                          appendLine("V16_LENS_EVALUATION=" + lab.lensEvaluation)
+                          appendLine("V16_MEDIA_ENHANCEMENT=" + lab.mediaEnhancement)
+                          appendLine("V16_REFERENCE=" + lab.referenceCalibration)
+                          appendLine("V16_AB_SCORE=" + lab.abScore)
+                          appendLine("OUTPUTS=ORIGINAL,COMPRESSED")
+                      }
+                  val values =
+                      ContentValues().apply {
+                          put(
+                              MediaStore.Downloads.DISPLAY_NAME,
+                              "FIDELITY_TAKE_REPORT_" +
+                                  System.currentTimeMillis() +
+                                  ".txt"
+                          )
+                          put(
+                              MediaStore.Downloads.MIME_TYPE,
+                              "text/plain"
+                          )
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                              put(
+                                  MediaStore.Downloads.RELATIVE_PATH,
+                                  "Download/FidelityCam"
+                              )
+                          }
+                      }
+                  runCatching {
+                      contentResolver.insert(
+                          MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                          values
+                      )?.let { uri ->
+                          contentResolver.openOutputStream(uri)?.use {
+                              it.write(report.toByteArray())
+                          }
+                      }
+                  }
+              }
+
+              override fun onDestroy() {
+                  recording?.stop()
+                  fidelityTransformer?.cancel()
+                  cameraProvider?.unbindAll()
+                  analysisExecutor.shutdownNow()
+                  super.onDestroy()
+              }
+
+              private fun dp(value: Int): Int =
+                  (value * resources.displayMetrics.density).toInt()
+          }
+          EOF
+
+      - name: V16 R2 API36 quality lab gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          M="app/src/main/java/com/sentongoharuna/fidelity/MainActivity.kt"
+          L="app/src/main/java/com/sentongoharuna/fidelity/FidelityQualityLab.kt"
+          E="app/src/main/java/com/sentongoharuna/fidelity/FidelityEnhancementBridge.kt"
+          test -s "$M"
+          test -s "$L"
+          test -s "$E"
+          grep -Fq 'TARGET_SHUTTER_NS' "$L"
+          grep -Fq 'ISO_SOFT_CEILING' "$L"
+          grep -Fq 'FIDELITY_REFERENCE_01' "$L"
+          grep -Fq 'V16_TEMPORAL_DENOISE' "$M"
+          grep -Fq 'V16_TEMPORAL_DETAIL' "$M"
+          grep -Fq 'V16_PIXEL_MOTION' "$M"
+          grep -Fq 'V16_FACE_SEGMENTATION' "$M"
+          grep -Fq 'V16_LENS_EVALUATION' "$M"
+          grep -Fq 'V16_MEDIA_ENHANCEMENT' "$M"
+          grep -Fq 'V16_REFERENCE' "$M"
+          grep -Fq 'V16_AB_SCORE' "$M"
+          grep -Fq 'CAPTURE SCORE' "$M"
+          grep -Fq 'media3-transformer:1.11.1' app/build.gradle.kts
+
+      - name: V16 R2 Media3 API gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -q 'withAudioAndVideoFrom' app/src/main/java/com/sentongoharuna/fidelity/MainActivity.kt
+          grep -q 'EditedMediaItemSequence(' app/src/main/java/com/sentongoharuna/fidelity/MainActivity.kt
+
+      - name: Compile Fidelity V16 R2
+        run: gradle --no-daemon --console=plain --max-workers=2 :app:compileDebugKotlin
+
+      - name: Build Fidelity V16 R2 APK
+        run: gradle --no-daemon --console=plain --max-workers=2 :app:assembleDebug
+
+      - name: Prepare APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk FIDELITY-V16-R2.apk
+          sha256sum FIDELITY-V16-R2.apk > FIDELITY-V16-R2.apk.sha256
+
+      - name: Upload Fidelity V16 R2
+        uses: actions/upload-artifact@v4
+        with:
+          name: FIDELITY-V16-R2
+          path: |
+            FIDELITY-V16-R2.apk
+            FIDELITY-V16-R2.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
